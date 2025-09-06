@@ -1,84 +1,99 @@
-#include "proto.h"
 #include "audio_source.h"
-#include "transport.h"
 #include "opus_codec.h"
+#include "transport.h"
+#include "proto.h"
 
-#include <chrono>
-#include <vector>
-#include <iostream>
-#include <memory>
 #include <cstdint>
-#include <string>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <vector>
+#include <memory>
+#include <iostream>
+#include <chrono>
 
 #if defined(_WIN32)
   #include <winsock2.h>
   #include <ws2tcpip.h>
+#elif defined(PLATFORM_ESP32)
+  #include <lwip/inet.h>
 #else
   #include <arpa/inet.h>
 #endif
 
-using namespace std::chrono;
+// Selezione della sorgente audio
+#if defined(PLATFORM_ESP32)
+  IAudioSource* makeEsp32I2SSource(int sample_rate, int channels);
+  #define MAKE_DEFAULT_SOURCE  makeEsp32I2SSource
+#else
+  IAudioSource* makePortAudioSource(int sample_rate, int channels);
+  #define MAKE_DEFAULT_SOURCE  makePortAudioSource
+#endif
 
-static uint64_t now_ns() {
+static inline uint64_t now_ns() {
+    using namespace std::chrono;
     return duration_cast<nanoseconds>(steady_clock::now().time_since_epoch()).count();
 }
 
 int client_main(int argc, char** argv) {
-#if defined(PLATFORM_ESP32)
-    // Values can be overridden via build_flags
-    #ifndef CLIENT_ID
-    #define CLIENT_ID 1
-    #endif
-    #ifndef SERVER_IP
-    #define SERVER_IP "192.168.1.100"
-    #endif
-    #ifndef SERVER_PORT
-    #define SERVER_PORT 9000
-    #endif
-    uint32_t client_id = CLIENT_ID;
-    std::string server_ip = SERVER_IP;
-    uint16_t port = SERVER_PORT;
-#else
     if (argc < 4) {
-        std::cerr << "Usage: opus_client <client_id> <server_ip> <port>\n";
+        std::cerr << "Usage: " << (argc>0?argv[0]:"opus_client")
+                  << " <client_id> <server_ip> <port>\n";
         return 1;
     }
-    uint32_t client_id = (uint32_t)std::stoul(argv[1]);
-    std::string server_ip = argv[2];
-    uint16_t port = (uint16_t)std::stoul(argv[3]);
-#endif
 
-#if defined(PLATFORM_DESKTOP)
-    std::unique_ptr<IAudioSource> src(makePortAudioSource(proto::SAMPLE_RATE, proto::CHANNELS));
-#elif defined(PLATFORM_ESP32)
-    std::unique_ptr<IAudioSource> src(makeEsp32I2SSource(proto::SAMPLE_RATE, proto::CHANNELS));
-#else
-    #error "Select PLATFORM_DESKTOP or PLATFORM_ESP32"
-#endif
+    const uint32_t client_id = static_cast<uint32_t>(std::strtoul(argv[1], nullptr, 10));
+    const std::string server_ip = argv[2];
+    const uint16_t port = static_cast<uint16_t>(std::strtoul(argv[3], nullptr, 10));
 
-    std::unique_ptr<ITransportSender> tx(makeUdpSender(server_ip, port));
-    std::unique_ptr<OpusEncoderWrapper> enc(makeOpusEncoder(proto::SAMPLE_RATE, proto::CHANNELS, 32000)); // 32 kbps
+    try {
+        // Sorgente audio
+        std::unique_ptr<IAudioSource> src(MAKE_DEFAULT_SOURCE(proto::SAMPLE_RATE, proto::CHANNELS));
 
-    const int frame_samples = proto::SAMPLES_PER_FRAME; // 960
-    std::vector<int16_t> pcm(frame_samples);
-    std::vector<uint8_t> packet(sizeof(proto::AudioHeader) + 400);
+        // Trasporto
+        std::unique_ptr<ITransportSender> tx(makeUdpSender(server_ip, port));
 
-    uint32_t seq = 0;
-    while (true) {
-        size_t got = src->read(pcm.data(), pcm.size());
-        if (got != (size_t)frame_samples) continue;
+        // Opus encoder (32 kbps, 20 ms, mono)
+        std::unique_ptr<OpusEncoderWrapper> enc(makeOpusEncoder(proto::SAMPLE_RATE, proto::CHANNELS, 32000));
 
-        int nbytes = enc->encode(pcm.data(), frame_samples,
-                                 packet.data() + sizeof(proto::AudioHeader),
-                                 (int)(packet.size() - sizeof(proto::AudioHeader)));
-        if (nbytes <= 0) continue;
+        const int frame_samples = proto::SAMPLES_PER_FRAME; // 960 @ 48kHz, 20ms
+        std::vector<int16_t> pcm(frame_samples);
 
-        auto* h = (proto::AudioHeader*)packet.data();
-        h->client_id = htonl(client_id);
-        h->seq       = htonl(seq++);
-        h->ts_ns     = proto::htobe64_u64(now_ns());
+        // Pacchetto: header + payload opus (400B è abbondante a 20ms, 32kbps)
+        std::vector<uint8_t> packet(sizeof(proto::AudioHeader) + 400);
 
-        size_t total = sizeof(proto::AudioHeader) + (size_t)nbytes;
-        tx->send(packet.data(), total);
+        uint32_t seq = 0;
+        while (true) {
+            // 1) cattura PCM 20ms
+            size_t got = src->read(pcm.data(), pcm.size());
+            if (got != (size_t)frame_samples) {
+                // su desktop può capitare con buffer variabile; aspetta/continua
+                continue;
+            }
+
+            // 2) encode Opus
+            uint8_t* payload = packet.data() + sizeof(proto::AudioHeader);
+            int max_payload = (int)(packet.size() - sizeof(proto::AudioHeader));
+            int nbytes = enc->encode(pcm.data(), frame_samples, payload, max_payload);
+            if (nbytes <= 0) {
+                // frame drop, continua
+                continue;
+            }
+
+            // 3) header
+            auto* h = reinterpret_cast<proto::AudioHeader*>(packet.data());
+            h->client_id = htonl(client_id);
+            h->seq       = htonl(seq++);
+            h->ts_ns     = proto::htobe64_u64(now_ns());
+
+            // 4) invia
+            size_t total = sizeof(proto::AudioHeader) + (size_t)nbytes;
+            if (!tx->send(packet.data(), total)) {
+                // opzionale: log o retry/backoff
+            }
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "client_main error: " << e.what() << "\n";
+        return 2;
     }
 }
