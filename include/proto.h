@@ -1,8 +1,18 @@
-#pragma once
-#include <cstdint>
-#include <cstddef>
+ #pragma once
+ #include <cstdint>
+ #include <cstddef>
+ 
+// endian helpers for htobe64 on different OSes
+#if defined(__linux__)
+  #include <endian.h>
+#elif defined(__APPLE__)
+  #include <libkern/OSByteOrder.h>
+  #ifndef htobe64
+    #define htobe64(x) OSSwapHostToBigInt64(x)
+  #endif
+#endif
 
-namespace proto {
+ namespace proto {
 #pragma pack(push, 1)
 struct AudioHeader {
     uint32_t client_id;
