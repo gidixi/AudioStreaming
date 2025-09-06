@@ -21,7 +21,7 @@ class Esp32I2SSource : public IAudioSource {
 public:
     Esp32I2SSource(int sample_rate, int channels)
     : sample_rate_(sample_rate), channels_(channels) {
-        // Crea canale RX standard
+        // Create RX standard channel
         i2s_chan_config_t chan_cfg = {};
         chan_cfg.id = I2S_NUM_0;
         chan_cfg.role = I2S_ROLE_MASTER;
@@ -33,17 +33,15 @@ public:
         clk.clk_src = I2S_CLK_SRC_DEFAULT;
         clk.mclk_multiple = I2S_MCLK_MULTIPLE_256;
 
-        // Config “slot” (formato dati I2S Philips)
+        // Configure I2S slot (Philips format)
         i2s_std_slot_config_t slot{};
         slot.data_bit_width = I2S_DATA_BIT_WIDTH_16BIT;
-        slot.slot_bit_width = I2S_DATA_BIT_WIDTH_16BIT;
+        slot.slot_bit_width = I2S_SLOT_BIT_WIDTH_16BIT;
         slot.slot_mode = (channels_ == 2) ? I2S_SLOT_MODE_STEREO : I2S_SLOT_MODE_MONO;
         slot.slot_mask = (channels_ == 2) ? I2S_STD_SLOT_BOTH : I2S_STD_SLOT_LEFT;
         slot.ws_width = I2S_DATA_BIT_WIDTH_16BIT;
         slot.ws_pol = false;
         slot.bit_shift = true;
-        slot.left_align = true;
-        slot.big_endian = false;
         slot.msb_right = false;
 
         // GPIO
@@ -83,7 +81,7 @@ public:
 private:
     int sample_rate_;
     int channels_;
-    i2s_channel_handle_t rx_{};
+    i2s_chan_handle_t rx_{};
 };
 
 IAudioSource* makeEsp32I2SSource(int sample_rate, int channels) {
