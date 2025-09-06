@@ -24,6 +24,21 @@ static uint64_t now_ns() {
 }
 
 int client_main(int argc, char** argv) {
+#if defined(PLATFORM_ESP32)
+    // Values can be overridden via build_flags
+    #ifndef CLIENT_ID
+    #define CLIENT_ID 1
+    #endif
+    #ifndef SERVER_IP
+    #define SERVER_IP "192.168.1.100"
+    #endif
+    #ifndef SERVER_PORT
+    #define SERVER_PORT 9000
+    #endif
+    uint32_t client_id = CLIENT_ID;
+    std::string server_ip = SERVER_IP;
+    uint16_t port = SERVER_PORT;
+#else
     if (argc < 4) {
         std::cerr << "Usage: opus_client <client_id> <server_ip> <port>\n";
         return 1;
@@ -31,6 +46,7 @@ int client_main(int argc, char** argv) {
     uint32_t client_id = (uint32_t)std::stoul(argv[1]);
     std::string server_ip = argv[2];
     uint16_t port = (uint16_t)std::stoul(argv[3]);
+#endif
 
 #if defined(PLATFORM_DESKTOP)
     std::unique_ptr<IAudioSource> src(makePortAudioSource(proto::SAMPLE_RATE, proto::CHANNELS));
