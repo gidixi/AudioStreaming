@@ -13,6 +13,8 @@
         "cstdint": "cpp",
         "iostream": "cpp",
         "chrono": "cpp",
-        "filesystem": "cpp"
+        "filesystem": "cpp",
+        "stdexcept": "cpp",
+        "cstring": "cpp"
     }
 }

@@ -1,6 +1,5 @@
 #include "opus_codec.h"
-
-#include <opus/opus.h>
+#include <opus.h>
 #include <stdexcept>
 #include <cstdint>
 

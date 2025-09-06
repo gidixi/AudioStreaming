@@ -1,7 +1,20 @@
 #pragma once
-#include <cstdint>
 #include <string>
-#include <cstddef>
+#if defined(_WIN32)
+  #include <winsock2.h>
+  #include <ws2tcpip.h>
+#elif defined(PLATFORM_ESP32)
+  #include <lwip/sockets.h>
+  #include <lwip/inet.h>
+  #include <lwip/netdb.h>
+  #include <unistd.h>
+#else
+  #include <arpa/inet.h>
+  #include <netinet/in.h>
+  #include <sys/socket.h>
+  #include <unistd.h>
+#endif
+
 
 class ITransportSender {
 public:

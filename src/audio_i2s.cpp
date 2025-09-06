@@ -2,55 +2,91 @@
 
 #if defined(PLATFORM_ESP32)
 extern "C" {
-#include "driver/i2s.h"
 #include "freertos/FreeRTOS.h"
+#include "driver/i2s_std.h"
 }
+#include <cstdint>
+
+#ifndef I2S_BCLK_PIN
+#define I2S_BCLK_PIN 26
+#endif
+#ifndef I2S_WS_PIN
+#define I2S_WS_PIN 25
+#endif
+#ifndef I2S_DATA_IN_PIN
+#define I2S_DATA_IN_PIN 34
+#endif
 
 class Esp32I2SSource : public IAudioSource {
 public:
     Esp32I2SSource(int sample_rate, int channels)
-        : sample_rate_(sample_rate), channels_(channels) {
-        i2s_config_t config = {};
-        config.mode = static_cast<i2s_mode_t>(I2S_MODE_MASTER | I2S_MODE_RX);
-        config.sample_rate = sample_rate_;
-        config.bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT;
-        config.channel_format = (channels_ == 2)
-                                   ? I2S_CHANNEL_FMT_RIGHT_LEFT
-                                   : I2S_CHANNEL_FMT_ONLY_LEFT;
-        config.communication_format = I2S_COMM_FORMAT_STAND_I2S;
-        config.intr_alloc_flags = ESP_INTR_FLAG_LEVEL1;
-        config.dma_buf_count = 4;
-        config.dma_buf_len = 512;
-        config.use_apll = false;
-        config.tx_desc_auto_clear = false;
-        config.fixed_mclk = 0;
+    : sample_rate_(sample_rate), channels_(channels) {
+        // Crea canale RX standard
+        i2s_chan_config_t chan_cfg = {};
+        chan_cfg.id = I2S_NUM_0;
+        chan_cfg.role = I2S_ROLE_MASTER;
+        ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, &rx_, nullptr));
 
-        i2s_driver_install(I2S_NUM_0, &config, 0, nullptr);
+        // Config clock
+        i2s_std_clk_config_t clk{};
+        clk.sample_rate_hz = sample_rate_;
+        clk.clk_src = I2S_CLK_SRC_DEFAULT;
+        clk.mclk_multiple = I2S_MCLK_MULTIPLE_256;
 
-        i2s_pin_config_t pin_cfg = {};
-        pin_cfg.bck_io_num = I2S_PIN_NO_CHANGE;
-        pin_cfg.ws_io_num = I2S_PIN_NO_CHANGE;
-        pin_cfg.data_out_num = I2S_PIN_NO_CHANGE;
-        pin_cfg.data_in_num = I2S_PIN_NO_CHANGE;
-        i2s_set_pin(I2S_NUM_0, &pin_cfg);
-        i2s_zero_dma_buffer(I2S_NUM_0);
+        // Config “slot” (formato dati I2S Philips)
+        i2s_std_slot_config_t slot{};
+        slot.data_bit_width = I2S_DATA_BIT_WIDTH_16BIT;
+        slot.slot_bit_width = I2S_DATA_BIT_WIDTH_16BIT;
+        slot.slot_mode = (channels_ == 2) ? I2S_SLOT_MODE_STEREO : I2S_SLOT_MODE_MONO;
+        slot.slot_mask = (channels_ == 2) ? I2S_STD_SLOT_BOTH : I2S_STD_SLOT_LEFT;
+        slot.ws_width = I2S_DATA_BIT_WIDTH_16BIT;
+        slot.ws_pol = false;
+        slot.bit_shift = true;
+        slot.left_align = true;
+        slot.big_endian = false;
+        slot.msb_right = false;
+
+        // GPIO
+        i2s_std_gpio_config_t gpio{};
+        gpio.mclk = I2S_GPIO_UNUSED;
+        gpio.bclk = (gpio_num_t)I2S_BCLK_PIN;
+        gpio.ws   = (gpio_num_t)I2S_WS_PIN;
+        gpio.dout = I2S_GPIO_UNUSED;
+        gpio.din  = (gpio_num_t)I2S_DATA_IN_PIN;
+
+        // Config aggregata
+        i2s_std_config_t stdcfg{};
+        stdcfg.clk_cfg  = clk;
+        stdcfg.slot_cfg = slot;
+        stdcfg.gpio_cfg = gpio;
+
+        ESP_ERROR_CHECK(i2s_channel_init_std_mode(rx_, &stdcfg));
+        ESP_ERROR_CHECK(i2s_channel_enable(rx_));
     }
 
-    ~Esp32I2SSource() override { i2s_driver_uninstall(I2S_NUM_0); }
+    ~Esp32I2SSource() override {
+        if (rx_) {
+            i2s_channel_disable(rx_);
+            i2s_del_channel(rx_);
+        }
+    }
 
-    size_t read(int16_t *dst, size_t max_samples) override {
+    size_t read(int16_t* dst, size_t max_samples) override {
         size_t bytes_read = 0;
-        i2s_read(I2S_NUM_0, dst, max_samples * sizeof(int16_t), &bytes_read,
-                 portMAX_DELAY);
+        // portMAX_DELAY è in FreeRTOS.h
+        esp_err_t err = i2s_channel_read(rx_, dst, max_samples * sizeof(int16_t),
+                                         &bytes_read, portMAX_DELAY);
+        if (err != ESP_OK) return 0;
         return bytes_read / sizeof(int16_t);
     }
 
 private:
     int sample_rate_;
     int channels_;
+    i2s_channel_handle_t rx_{};
 };
 
-IAudioSource *makeEsp32I2SSource(int sample_rate, int channels) {
+IAudioSource* makeEsp32I2SSource(int sample_rate, int channels) {
     return new Esp32I2SSource(sample_rate, channels);
 }
 #endif
