@@ -10,6 +10,9 @@
         "functional": "cpp",
         "memory": "cpp",
         "mutex": "cpp",
-        "cstdint": "cpp"
+        "cstdint": "cpp",
+        "iostream": "cpp",
+        "chrono": "cpp",
+        "filesystem": "cpp"
     }
 }

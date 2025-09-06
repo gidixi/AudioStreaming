@@ -21,13 +21,21 @@ add_executable(opus_client
   src/audio_portaudio.cpp
   src/opus_codec.cpp
   src/sink_file.cpp
+  src/entry_client.cpp
 )
 add_executable(opus_server
+  src/entry_server.cpp
   src/server_main.cpp
   src/transport_udp.cpp
   src/opus_codec.cpp
   src/sink_file.cpp
 )
+
+find_package(Threads REQUIRED)
+
+target_link_libraries(opus_client PRIVATE ${OPUS_LIBRARIES} ${PORTAUDIO_LIB} Threads::Threads)
+target_link_libraries(opus_server PRIVATE ${OPUS_LIBRARIES} Threads::Threads)
+
 
 target_include_directories(opus_client PRIVATE include ${OPUS_INCLUDE_DIRS} ${PORTAUDIO_INCLUDE_DIR})
 target_include_directories(opus_server PRIVATE include ${OPUS_INCLUDE_DIRS})

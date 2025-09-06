@@ -1,8 +1,8 @@
- #pragma once
- #include <cstdint>
- #include <cstddef>
- 
-// endian helpers for htobe64 on different OSes
+#pragma once
+#include <cstdint>
+#include <cstddef>
+
+// endian helpers per htobe64 su Linux/macOS
 #if defined(__linux__)
   #include <endian.h>
 #elif defined(__APPLE__)
@@ -12,7 +12,7 @@
   #endif
 #endif
 
- namespace proto {
+namespace proto {
 #pragma pack(push, 1)
 struct AudioHeader {
     uint32_t client_id;
@@ -25,14 +25,7 @@ static constexpr int SAMPLE_RATE = 48000;
 static constexpr int CHANNELS    = 1;
 static constexpr int FRAME_MS    = 20;
 static constexpr int SAMPLES_PER_FRAME = SAMPLE_RATE * FRAME_MS / 1000;
-static constexpr int BYTES_PER_SAMPLE = 2;
-
-#if defined(_WIN32)
-  #include <winsock2.h>
-  #include <ws2tcpip.h>
-#else
-  #include <arpa/inet.h>
-#endif
+static constexpr int BYTES_PER_SAMPLE  = 2;
 
 inline uint64_t htobe64_u64(uint64_t x) {
 #if defined(__APPLE__) || defined(__linux__)
